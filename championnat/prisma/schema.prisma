@@ -1,0 +1,262 @@
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "postgresql"; url = env("DATABASE_URL") }
+
+enum Role { SUPER_ADMIN ADMIN REGISTRATION_MANAGER SPORTS_MANAGER MATCH_OFFICIAL REFEREE }
+enum ValidationStatus { DRAFT PENDING VALIDATED REJECTED SUSPENDED }
+enum MatchStatus { SCHEDULED LIVE FINISHED POSTPONED CANCELLED }
+enum RefereeRole { CENTRAL ASSISTANT FOURTH COMMISSIONER }
+enum EventType { GOAL YELLOW_CARD RED_CARD SUBSTITUTION }
+enum StaffFunction { HEAD_COACH ASSISTANT_COACH FITNESS_COACH DOCTOR PHYSIO TEAM_MANAGER OFFICIAL OTHER }
+enum Position { GOALKEEPER DEFENDER MIDFIELDER FORWARD }
+enum Foot { LEFT RIGHT BOTH }
+enum SponsorCategory { OFFICIAL_SPONSOR OFFICIAL_PARTNER MEDIA_PARTNER TECHNICAL_PARTNER INSTITUTIONAL_PARTNER }
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role
+  active       Boolean  @default(true)
+  failedLogins Int      @default(0)
+  lockedUntil  DateTime?
+  createdAt    DateTime @default(now())
+  referee      Referee?
+  auditLogs    AuditLog[]
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  before    Json?
+  after     Json?
+  ip        String?
+  createdAt DateTime @default(now())
+  @@index([entity, entityId])
+}
+
+model Championship {
+  id          String  @id @default(cuid())
+  name        String  @default("Championnat de Lubumbashi (nom provisoire)")
+  year        Int
+  slogan      String?
+  logoUrl     String?
+  maxClubs    Int     @default(16)
+  tiebreakers Json
+  clubs       Club[]
+  groups      Group[]
+  matches     Match[]
+}
+
+model Club {
+  id             String   @id @default(cuid())
+  championshipId String
+  championship   Championship @relation(fields: [championshipId], references: [id])
+  name           String
+  logoPng        Bytes?
+  hasLogo        Boolean  @default(false)
+  logoValidated  Boolean  @default(false)
+  presidentName  String
+  representative String
+  phone          String
+  email          String
+  address        String
+  colors         String
+  status         ValidationStatus @default(PENDING)
+  groupLink      GroupClub?
+  players        Player[]
+  staff          StaffMember[]
+  homeMatches    Match[] @relation("home")
+  awayMatches    Match[] @relation("away")
+  createdAt      DateTime @default(now())
+  @@unique([championshipId, name])
+}
+
+model Group {
+  id             String  @id @default(cuid())
+  championshipId String
+  championship   Championship @relation(fields: [championshipId], references: [id])
+  name           String
+  published      Boolean @default(false)
+  clubs          GroupClub[]
+  matches        Match[]
+  @@unique([championshipId, name])
+}
+
+model GroupClub {
+  groupId String
+  clubId  String @unique
+  group   Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  club    Club  @relation(fields: [clubId], references: [id])
+  @@id([groupId, clubId])
+}
+
+model Player {
+  id             String   @id @default(cuid())
+  matricule      String   @unique
+  clubId         String
+  club           Club     @relation(fields: [clubId], references: [id])
+  lastName       String
+  middleName     String
+  firstName      String
+  birthDate      DateTime
+  nationality    String
+  position       Position
+  jerseyNumber   Int
+  foot           Foot
+  heightCm       Int?
+  phone          String?
+  photoKey       String
+  identityDocKey String?
+  identityHash   String   @unique
+  status         ValidationStatus @default(PENDING)
+  card           IdCard?
+  events         MatchEvent[]
+  lineups        Lineup[]
+  sanctions      Sanction[]
+  createdAt      DateTime @default(now())
+  @@unique([clubId, jerseyNumber])
+}
+
+model StaffMember {
+  id         String   @id @default(cuid())
+  matricule  String   @unique
+  clubId     String
+  club       Club     @relation(fields: [clubId], references: [id])
+  lastName   String
+  middleName String
+  firstName  String
+  function   StaffFunction
+  phone      String?
+  photoKey   String
+  status     ValidationStatus @default(PENDING)
+  card       IdCard?
+}
+
+model Referee {
+  id            String   @id @default(cuid())
+  matricule     String   @unique
+  userId        String?  @unique
+  user          User?    @relation(fields: [userId], references: [id])
+  lastName      String
+  firstName     String
+  nationality   String
+  qualification String
+  level         String
+  phone         String
+  photoKey      String
+  status        ValidationStatus @default(PENDING)
+  assignments   MatchOfficial[]
+}
+
+model IdCard {
+  id       String   @id @default(cuid())
+  qrToken  String   @unique
+  revoked  Boolean  @default(false)
+  playerId String?  @unique
+  player   Player?  @relation(fields: [playerId], references: [id])
+  staffId  String?  @unique
+  staff    StaffMember? @relation(fields: [staffId], references: [id])
+  issuedAt DateTime @default(now())
+}
+
+model Match {
+  id              String   @id @default(cuid())
+  championshipId  String
+  championship    Championship @relation(fields: [championshipId], references: [id])
+  groupId         String?
+  group           Group?   @relation(fields: [groupId], references: [id])
+  matchday        Int
+  homeClubId      String
+  awayClubId      String
+  home            Club     @relation("home", fields: [homeClubId], references: [id])
+  away            Club     @relation("away", fields: [awayClubId], references: [id])
+  kickoff         DateTime
+  stadium         String
+  status          MatchStatus @default(SCHEDULED)
+  homeScore       Int?
+  awayScore       Int?
+  manOfTheMatchId String?
+  observations    String?
+  resultValidated Boolean  @default(false)
+  published       Boolean  @default(false)
+  officials       MatchOfficial[]
+  lineups         Lineup[]
+  events          MatchEvent[]
+  @@index([kickoff])
+}
+
+model MatchOfficial {
+  matchId   String
+  refereeId String
+  role      RefereeRole
+  match     Match   @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  referee   Referee @relation(fields: [refereeId], references: [id])
+  @@id([matchId, refereeId])
+}
+
+model Lineup {
+  matchId  String
+  playerId String
+  starter  Boolean
+  match    Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  player   Player @relation(fields: [playerId], references: [id])
+  @@id([matchId, playerId])
+}
+
+model MatchEvent {
+  id              String    @id @default(cuid())
+  matchId         String
+  match           Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  playerId        String
+  player          Player    @relation(fields: [playerId], references: [id])
+  type            EventType
+  minute          Int
+  assistPlayerId  String?
+  relatedPlayerId String?
+}
+
+model Sanction {
+  id               String   @id @default(cuid())
+  playerId         String
+  player           Player   @relation(fields: [playerId], references: [id])
+  reason           String
+  matchesSuspended Int
+  decision         String
+  published        Boolean  @default(false)
+  createdAt        DateTime @default(now())
+}
+
+model News {
+  id          String   @id @default(cuid())
+  title       String
+  body        String
+  category    String
+  published   Boolean  @default(false)
+  publishedAt DateTime?
+  createdAt   DateTime @default(now())
+}
+
+model Document {
+  id        String   @id @default(cuid())
+  title     String
+  category  String
+  fileKey   String
+  isPublic  Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model Sponsor {
+  id          String   @id @default(cuid())
+  name        String
+  logoUrl     String
+  website     String?
+  description String?
+  category    SponsorCategory
+  position    Int      @default(0)
+  active      Boolean  @default(true)
+}
